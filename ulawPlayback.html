@@ -1,0 +1,124 @@
+<html>
+	<script>
+
+		var nextTime = 0;
+//
+// I lifted this algorithm from here:
+//      http://dystopiancode.blogspot.com/2012/02/pcm-law-and-u-law-companding-algorithms.html
+//
+// Javascript implements many of the operators as ANSI C, so it was (almost) just a
+// cut'n'paste operation.
+//
+function ulawExpand( number )
+{
+	var MULAW_BIAS = 33;
+	var sign = 0;
+	var position = 0;
+	var decoded = 0;
+	number = ~number;
+	if (number & 0x80)
+	{
+		number &= ~(1 << 7);
+		sign = -1;
+	}
+	position = ((number & 0xF0) >> 4) + 5;
+	decoded = ((1 << position) | ((number & 0x0F) << (position - 4)) | (1 << (position - 5))) - MULAW_BIAS;
+	if( sign == 0 )
+		return decoded;
+	else
+		return -decoded; 
+}
+
+
+function now()
+{
+	// figured out how to load a file for processing using HTML here:
+	//      http://stackoverflow.com/questions/29317866/read-samples-from-wav-file
+	document.getElementById("fileupload").onchange = function(evt)
+	{
+
+		files = evt.target.files;
+		var reader = new FileReader();
+
+		reader.onloadend = function ()
+		{
+			var ac = new AudioContext();
+			// note that the file is apparently encoded as 8 bit integers
+			var int8 = new Int8Array(reader.result);
+			console.log(int8);
+			// also note the [m]u-Law (μ-Law) Expansion is for 16 bit integers 
+			var int16 = new Int16Array(int8.length);
+
+			for( i=0; i<int16.length; i++ )
+			{
+				int16[i] = ulawExpand(int8[i]);
+			}
+			// convert to floats
+			var floats = new Float32Array(int16.length);
+			for( i=0; i<int16.length; i++ )
+			{
+				// division is different based on sign
+				//     http://stackoverflow.com/questions/15087668/how-to-convert-pcm-samples-in-byte-array-as-floating-point-numbers-in-the-range
+				if( int16[i] < 0 )
+					floats[i] = int16[i] / 32768;
+				else
+					floats[i] = int16[i] / 32767;
+			}
+			console.log(floats);
+			var offset = 0;
+			var interval = 100;
+			while( offset < floats.length )
+			{
+				for( i=0; i<interval; i++ )
+				{
+					var buffer = new Float32Array(interval);
+					for( j=0; j<interval; j++ )
+					{
+						buffer[j] = floats[offset+j];
+					}
+					offset = offset+j;
+					// set the sample rate, I grabbed this from an ffprobe of the sample file
+					// got the sample files from
+					//      http://www.class-connection.com/8bit-ulaw.htm
+					var sampleRate = 8000;
+					// playback using the Web Audio API
+					var ab = ac.createBuffer(1, buffer.length, sampleRate)
+					var bs = ac.createBufferSource();
+
+					ab.getChannelData(0).set(buffer);
+					bs.buffer = ab;
+					bs.connect(ac.destination);
+					console.log("ac.currentTime = "+ac.currentTime);
+					if (nextTime == 0)
+						nextTime = ac.currentTime + 0.05;  /// add 50ms latency - tune this if you like
+					bs.start(nextTime);
+					nextTime = nextTime + bs.buffer.duration;
+					console.log(nextTime);
+				}
+			}
+		}
+	
+		reader.readAsArrayBuffer(files[0]);
+	}
+}
+/*
+// Create white noise
+samples = [];
+for( i=0; i<30000; i++ )
+{
+	samples[i] = Math.random()*256-127
+}
+console.log(samples);
+
+var floats = new Float32Array(samples.length);
+samples.forEach(function( sample, i ) {
+  floats[i] = sample < 0 ? sample / 0x80 : sample / 0x7F;
+});
+console.log(floats);
+*/
+	</script>
+<body onload="now()">
+	<input id="fileupload" type="file" name="wav"></input>
+</body>
+</html>
+
