@@ -1,0 +1,178 @@
+<html>
+<head>
+	<script>
+
+var sampleSize = 256;
+var times = 0;
+var startTime = 0;
+
+navigator.getUserMedia = (
+	navigator.getUserMedia ||
+	navigator.webkitGetUserMedia ||
+	navigator.mozGetUserMedia ||
+	navigator.msGetUserMedia
+);
+
+function playback( floats, delay )
+{
+	var max = 0;
+	max = floats[0]
+	for( i=1; i < floats.length; i++ )
+	{
+		if( max < floats[i] )
+			max = floats[i];
+	}
+	if( max > 0.07 )
+	{
+		document.getElementById("flasher").style.background = "green";
+	}
+	var sampleRate = 44100;
+	var ab = audioContext.createBuffer(1, floats.length, sampleRate)
+	var bs = audioContext.createBufferSource();
+
+	ab.getChannelData(0).set(floats);
+	bs.buffer = ab;
+	bs.connect(audioContext.destination);
+	if( startTime == 0 )
+		startTime = audioContext.currentTime + delay;
+	bs.start(startTime);
+	startTime = startTime + bs.buffer.duration;
+	setTimeout(function() { 
+		document.getElementById("flasher").style.background = "gray";
+	}, startTime);
+}
+
+function encodeDecode( data )
+{
+	var ints = float32To16Bit( data, 0 );
+	var encoded = new Uint8Array(ints.length);
+	for( i=0; i<ints.length; i++ )
+	{
+		encoded[i] = MuLawEncode(ints[i]);
+	}
+
+	var decoded = new Int16Array(data.length);
+	for( i=0; i<ints.length; i++ )
+	{
+		decoded[i] = MuLawDecode(encoded[i]);
+	}
+	var buffer = new Float32Array(data.length);
+	buffer = int16ToFloat32( decoded, 0, data.length );
+	playback( buffer, 5);
+}
+
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function float32To16Bit(inputArray)
+{
+	var output = new Int16Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var s = Math.max(-1, Math.min(1, inputArray[i]));
+		output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+	}
+	return output;
+}
+
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function int16ToFloat32(inputArray)
+{
+	var output = new Float32Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var int = inputArray[i];
+		// If the high bit is on, then it is a negative number, and actually counts backwards.
+		var float = (int >= 0x8000) ? -(0x10000 - int) / 0x8000 : int / 0x7FFF;
+		output[i] = float;
+	}
+	return output;
+}
+
+// This is a port directly from the USpeak C# source code
+function MuLawDecode( mulaw )
+{
+	var BIAS = 0x84;
+	mulaw = ~mulaw;
+	var sign = mulaw & 0x80;
+	var exponent = ( mulaw & 0x70 ) >> 4;
+	var data = mulaw & 0x0F;
+	data = data | 0x10;
+	data = data << 1;
+	data = data + 1;
+	data = data << (exponent + 2);
+	data = data - BIAS;
+	if( sign == 0 )
+		return data;
+	else
+		return -data;
+}
+
+function MuLawEncode( pcm )
+{
+	var BIAS = 0x84;
+	var MAX = 32635;
+
+	var sign = ( pcm & 0x8000 ) >> 8;
+	if( sign != 0 )
+		pcm = -pcm;
+	if( pcm > MAX )
+		pcm = MAX;
+	pcm += BIAS;
+	var exponent = 7;
+	for( expMask = 0x4000; ( pcm & expMask ) == 0; exponent--, expMask >>= 1 )
+	{
+	}
+	var mantissa = ( pcm >> ( exponent + 3 ) ) & 0x0f;
+	var mulaw = ( sign | exponent << 4 | mantissa );
+	return ~mulaw;
+}
+
+function setupAudioNode( stream )
+{
+	sourceNode = audioContext.createMediaStreamSource(stream);
+	javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
+	javascriptNode.onaudioprocess = function(e)
+	{
+		//playback( new Float32Array(e.inputBuffer.getChannelData(0)), 6 );
+		encodeDecode( new Float32Array(e.inputBuffer.getChannelData(0)));
+	}
+	sourceNode.connect(javascriptNode);
+	javascriptNode.connect(audioContext.destination);
+}
+
+function onAudioError(e)
+{
+	console.log(e);
+	alert(e);
+}
+
+function initializeMic()
+{
+	try
+	{
+		audioContext = new AudioContext();
+	}
+	catch(e)
+	{
+		alert('Web Audio API is not supported in this browser');
+	}
+
+	try
+	{
+		navigator.getUserMedia(
+			{ video: false, audio: true},
+			setupAudioNode,
+			onAudioError
+		);
+	}
+	catch (e)
+	{
+		alert('webkitGetUserMedia threw exception :' + e);
+	}
+}
+
+	</script>
+</head>
+<body onload="initializeMic()">
+	<div id="flasher" style="height:100px; width:100px; background-color:gray;"></div>
+</body>
+</html>
