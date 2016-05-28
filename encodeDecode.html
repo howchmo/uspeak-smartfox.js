@@ -44,7 +44,7 @@ function playback( floats, delay )
 
 function encodeDecode( data )
 {
-	var ints = float32To16Bit( data, 0 );
+	var ints = float32To16Bit( data );
 	var encoded = new Uint8Array(ints.length);
 	for( i=0; i<ints.length; i++ )
 	{
