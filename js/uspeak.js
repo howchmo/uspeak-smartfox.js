@@ -1,6 +1,6 @@
 var sfs;
 var config = {};
-var roomid = "MainLobby#_@LocalVoip#_@2ddfec51-80c5-4f47-9803-629d951d949d#_@public";
+
 var startTime = 0;
 var sampleSize = 256;
 var userid="1";
@@ -45,6 +45,32 @@ function downsample( buffer, sampleRate, outSampleRate)
 		offsetBuffer = nextOffsetBuffer;
 	}
 	return result;
+}
+
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function float32ToInt16(inputArray)
+{
+	var output = new Int16Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var s = Math.max(-1, Math.min(1, inputArray[i]));
+		output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+	}
+	return output;
+}
+
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function int16ToFloat32(inputArray)
+{
+	var output = new Float32Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var int = inputArray[i];
+		// If the high bit is on, then it is a negative number, and actually counts backwards.
+		var float = (int >= 0x8000) ? -(0x10000 - int) / 0x8000 : int / 0x7FFF;
+		output[i] = float;
+	}
+	return output;
 }
 
 
@@ -95,6 +121,7 @@ function playPCMclip( buffer )
 	audioBuffer.getChannelData(0).set(buffer);
 	source.buffer = audioBuffer;
 	source.connect(audioCtx.destination);
+
 	var delay = 5.0;
 	if( startTime == 0 || audioCtx.currentTime > startTime )
 	{
@@ -175,10 +202,12 @@ function onExtensionResponse( evt )
 	if( requestType == "VoipVCRequest" )
 	{
 		var params = evt.params;
-		if( true ) // params["ui"] != userid )
+		var data = params["VCData"];
+		if( params["ui"] != userid )
 		{
-			vcdata = params["VCData"].getSFSArray();
-			playMuLawClip(vcdata);
+			var data = params["VCData"];
+			console.log(params["ui"]+" is speaking");
+			playMuLawClip(data);
 		}
 	}
 }
@@ -210,31 +239,6 @@ function connect( host, port, zone, voipRoom )
 	// connect to SFS
 	sfs.connect(config.host, config.port );
 }
-// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
-function float32ToInt16(inputArray)
-{
-	var output = new Int16Array(inputArray.length);
-	for (var i = 0; i < inputArray.length; i++)
-	{
-		var s = Math.max(-1, Math.min(1, inputArray[i]));
-		output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-	}
-	return output;
-}
-
-// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
-function int16ToFloat32(inputArray)
-{
-	var output = new Float32Array(inputArray.length);
-	for (var i = 0; i < inputArray.length; i++)
-	{
-		var int = inputArray[i];
-		// If the high bit is on, then it is a negative number, and actually counts backwards.
-		var float = (int >= 0x8000) ? -(0x10000 - int) / 0x8000 : int / 0x7FFF;
-		output[i] = float;
-	}
-	return output;
-}
 
 function sendAudio( floats )
 {
@@ -260,7 +264,7 @@ function sendAudio( floats )
 		//playMuLawClip(data);
 		var params = {};
 		params["ui"] = userid;
-		params["VCData"] = data;
+		params["VCData"] = Array.prototype.slice.call(data);
 		sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
 	}
 }
@@ -269,7 +273,7 @@ function setupAudioNode( stream )
 {
 	sourceNode = audioContext.createMediaStreamSource(stream);
 	javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
-	javascriptNode.onaudioprocess = function(e)
+	javascriptNode.onaudioprocess=function(e)
 	{
 		sendAudio( new Float32Array(e.inputBuffer.getChannelData(0)) );
 	}
@@ -320,6 +324,7 @@ function stopTalking()
 
 function init()
 {
+	userid = document.getElementById("userid").value;
 	var host = document.getElementById("host").value;
 	var port = document.getElementById("port").value;
 	var zone = document.getElementById("zone").value;
@@ -329,5 +334,3 @@ function init()
 
 	initializeMic();
 }
-
-
