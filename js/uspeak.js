@@ -1,11 +1,13 @@
 var sfs;
 var config = {};
-var roomid = "MainLobby#_@LocalVoip#_@0655795e-9916-4cfc-be1e-81f544d1d7cb#_@public";
+var roomid = "MainLobby#_@LocalVoip#_@2ddfec51-80c5-4f47-9803-629d951d949d#_@public";
 var startTime = 0;
 var sampleSize = 256;
 var userid="1";
 
 var audioCtx = new AudioContext();
+
+var sendingAudio = false;
 
 navigator.getUserMedia = (
 	navigator.getUserMedia ||
@@ -13,6 +15,38 @@ navigator.getUserMedia = (
 	navigator.mozGetUserMedia ||
 	navigator.msGetUserMedia
 );
+
+function downsample( buffer, sampleRate, outSampleRate)
+{
+	if (outSampleRate == sampleRate)
+	{
+		return buffer;
+	}
+	if (outSampleRate > sampleRate)
+	{
+		throw "downsampling rate shall be smaller than original sample rate";
+	}
+	var sampleRateRatio = sampleRate / outSampleRate;
+	var newLength = Math.round(buffer.length / sampleRateRatio);
+	var result = new Float32Array(newLength);
+	var offsetResult = 0;
+	var offsetBuffer = 0;
+	while (offsetResult < result.length)
+	{
+		var nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+		var accum = 0, count = 0;
+		for (var i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++)
+		{
+			accum += buffer[i];
+			count++;
+		}
+		result[offsetResult] = accum/count;
+		offsetResult++;
+		offsetBuffer = nextOffsetBuffer;
+	}
+	return result;
+}
+
 
 // This is a port directly from the USpeak C# source code
 function MuLawDecode( mulaw )
@@ -33,7 +67,7 @@ function MuLawDecode( mulaw )
 		return -data;
 }
 
-function MuLawEncode( /* int */ pcm )
+function MuLawEncode( pcm )
 {
 	var BIAS = 0x84;
 	var MAX = 32635;
@@ -61,7 +95,7 @@ function playPCMclip( buffer )
 	audioBuffer.getChannelData(0).set(buffer);
 	source.buffer = audioBuffer;
 	source.connect(audioCtx.destination);
-	var delay = 0.1;
+	var delay = 5.0;
 	if( startTime == 0 || audioCtx.currentTime > startTime )
 	{
 		document.getElementById("speaker").style.backgroundColor = "gray";
@@ -73,30 +107,19 @@ function playPCMclip( buffer )
 	setTimeout(function() { document.getElementById("speaker").style.backgroundColor = "gray"; }, (delay+audioBuffer.duration)*1000);
 }
 
-function playMuLawClip( data )
+function playMuLawClip( vcdata )
 {
-	var vcdata = new Uint8Array(data.length);
-	for( i=0; i<data.length; i++ )
-	{
-		vcdata[i] = data[i];
-	}
 	var offset = 0;
 	while( offset < vcdata.length )
 	{
 		var len = vcdata[offset];
-
 		var frame = new Int16Array(len);
 		for( i=0; i < frame.length; i++ )
 		{
 			frame[i] = MuLawDecode(vcdata[offset+i+6]);
 		}
 		offset = offset+i+6;
-		var buffer = new Float32Array(frame.length);
-		var divisor = 3267;
-		for( i=0; i < frame.length; i++ )
-		{
-			buffer[i] = frame[i]/divisor;
-		}
+		var buffer = int16ToFloat32( frame );
 		playPCMclip(buffer);
 	}
 }
@@ -148,16 +171,14 @@ function onRoomJoinError( evt )
 // SFS handler for Extension Response event
 function onExtensionResponse( evt )
 {
-	setTimeout(function() { document.getElementById("speaker").style.backgroundColor = "green"; }, startTime);
 	var requestType = evt.cmd;
 	if( requestType == "VoipVCRequest" )
 	{
 		var params = evt.params;
 		if( true ) // params["ui"] != userid )
 		{
-			var data = params["VCData"];
-			console.log(data);
-			playMuLawClip(data);
+			vcdata = params["VCData"].getSFSArray();
+			playMuLawClip(vcdata);
 		}
 	}
 }
@@ -189,24 +210,59 @@ function connect( host, port, zone, voipRoom )
 	// connect to SFS
 	sfs.connect(config.host, config.port );
 }
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function float32ToInt16(inputArray)
+{
+	var output = new Int16Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var s = Math.max(-1, Math.min(1, inputArray[i]));
+		output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+	}
+	return output;
+}
+
+// adapted from http://stackoverflow.com/questions/35234551/javascript-converting-from-int16-to-float32
+function int16ToFloat32(inputArray)
+{
+	var output = new Float32Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var int = inputArray[i];
+		// If the high bit is on, then it is a negative number, and actually counts backwards.
+		var float = (int >= 0x8000) ? -(0x10000 - int) / 0x8000 : int / 0x7FFF;
+		output[i] = float;
+	}
+	return output;
+}
 
 function sendAudio( floats )
 {
-	var data = new Uint8Array(floats.length+6);
-	data[0] = sampleSize-1;
-	data[1] = 0;
-	data[2] = 0;
-	data[3] = 0;
-	data[4] = 0;
-	data[5] = 0;
-	for( i=0; i<floats.length; i++ )
+	if( sendingAudio == true )
 	{
-		data[i+6] = MuLawEncode(Math.round(floats[i]*3267));
+		var resampled = downsample(floats, 44100, 8000);
+		//console.log("resampled");
+		//console.log(resampled);
+		var ints = float32ToInt16(resampled);
+		var encoded = new Int16Array(ints.length);
+		for( i=0; i<ints.length; i++ )
+			encoded[i] = MuLawEncode(ints[i]);
+		var data = new Int16Array(ints.length+6);
+		data[0] = ints.length;
+		for( var i=1; i<6; i++ )
+			data[i] = 0;
+		for( i=0; i<floats.length; i++ )
+		{
+			data[i+6] = encoded[i];
+		}
+		//console.log("sendAudio");
+		//console.log(data);
+		//playMuLawClip(data);
+		var params = {};
+		params["ui"] = userid;
+		params["VCData"] = data;
+		sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
 	}
-	var params = {};
-	params["ui"] = userid;
-	params["VCData"] = data;
-	sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
 }
 
 function setupAudioNode( stream )
@@ -215,7 +271,7 @@ function setupAudioNode( stream )
 	javascriptNode = audioContext.createScriptProcessor(sampleSize, 1, 1);
 	javascriptNode.onaudioprocess = function(e)
 	{
-		sendAudio( new Float32Array(e.inputBuffer.getChannelData(0)));
+		sendAudio( new Float32Array(e.inputBuffer.getChannelData(0)) );
 	}
 	sourceNode.connect(javascriptNode);
 	javascriptNode.connect(audioContext.destination);
@@ -250,6 +306,16 @@ function initializeMic()
 	{
 		alert('webkitGetUserMedia threw exception :' + e);
 	}
+}
+
+function talk()
+{
+	sendingAudio = true;
+}
+
+function stopTalking()
+{
+	sendingAudio = false;
 }
 
 function init()
