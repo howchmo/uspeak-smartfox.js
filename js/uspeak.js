@@ -3,7 +3,7 @@ var config = {};
 
 var startTime = 0;
 var sampleSize = 256;
-var userid="1";
+var userid=1;
 
 var audioCtx = new AudioContext();
 
@@ -51,6 +51,17 @@ function downsample( buffer, sampleRate, outSampleRate)
 function float32ToInt16(inputArray)
 {
 	var output = new Int16Array(inputArray.length);
+	for (var i = 0; i < inputArray.length; i++)
+	{
+		var s = Math.max(-1, Math.min(1, inputArray[i]));
+		output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+	}
+	return output;
+}
+
+function float32To16Bit(inputArray, startIndex)
+{
+	var output = new Uint16Array(inputArray.length-startIndex);
 	for (var i = 0; i < inputArray.length; i++)
 	{
 		var s = Math.max(-1, Math.min(1, inputArray[i]));
@@ -248,9 +259,13 @@ function sendAudio( floats )
 		//console.log("resampled");
 		//console.log(resampled);
 		var ints = float32ToInt16(resampled);
+		// console.log("ints");
+		// console.log(ints);
 		var encoded = new Int16Array(ints.length);
 		for( i=0; i<ints.length; i++ )
 			encoded[i] = MuLawEncode(ints[i]);
+		// console.log("encoded");
+		// console.log(encoded);
 		var data = new Int16Array(ints.length+6);
 		data[0] = ints.length;
 		for( var i=1; i<6; i++ )
@@ -261,10 +276,11 @@ function sendAudio( floats )
 		}
 		//console.log("sendAudio");
 		//console.log(data);
-		//playMuLawClip(data);
+		// playMuLawClip(data);
 		var params = {};
-		params["ui"] = userid;
+		params["ui"] = parseInt(userid);
 		params["VCData"] = Array.prototype.slice.call(data);
+		// console.log(params["VCData"]);
 		sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
 	}
 }
@@ -324,7 +340,7 @@ function stopTalking()
 
 function init()
 {
-	userid = document.getElementById("userid").value;
+	userid = parseInt(document.getElementById("userid").value);
 	var host = document.getElementById("host").value;
 	var port = document.getElementById("port").value;
 	var zone = document.getElementById("zone").value;
