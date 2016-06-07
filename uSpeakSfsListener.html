@@ -2,6 +2,7 @@
 <head>
 	<title>uSpeak Javascript Test</title>
 	<script type="text/javascript" src="js/SFS2X_API_JS.js"></script>
+<!--	<script type="text/javascript" src="js/encodedSamples.js"></script> -->
 	<script type="text/javascript" src="js/uspeak.js"></script>
 </head>
 <body>
@@ -24,13 +25,15 @@
 		</tr>
 		<tr>
 			<td>room:</td>
-			<td><input size="100" id="room" type="text" value="MainLobby#_@LocalVoip#_@0655795e-9916-4cfc-be1e-81f544d1d7cb#_@public"></td>
+			<td><input size="100" id="room" type="text" value="Smartfox Room Identifier"></td>
 		</tr>
 	</table>
 	<div id="connect">
 		<input type="button" value="Connect to Smartfox" onclick="init();">
 	</div>
 	<div id="speaker" style="width:300px; height:20px; background-color:gray" onmousedown="talk()" onmouseup="stopTalking()"></div>
+
+<!-- 	<input type="button" value="Send Samples" onclick="sendSamples();"> -->
 </body>
 </html>
 

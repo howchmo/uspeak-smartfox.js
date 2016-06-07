@@ -133,7 +133,7 @@ function playPCMclip( buffer )
 	source.buffer = audioBuffer;
 	source.connect(audioCtx.destination);
 
-	var delay = 5.0;
+	var delay = 0.5;
 	if( startTime == 0 || audioCtx.currentTime > startTime )
 	{
 		document.getElementById("speaker").style.backgroundColor = "gray";
@@ -145,8 +145,19 @@ function playPCMclip( buffer )
 	setTimeout(function() { document.getElementById("speaker").style.backgroundColor = "gray"; }, (delay+audioBuffer.duration)*1000);
 }
 
-function playMuLawClip( vcdata )
+function normalizeData( data )
 {
+	for( var i=0; i<data.length; i++ )
+	{
+		if( data[i] < 0 )
+			data[i] = 256+data[i];
+	}
+	return data;
+}
+
+function playMuLawClip( data )
+{
+	var vcdata = data; // normalizeData(data);
 	var offset = 0;
 	while( offset < vcdata.length )
 	{
@@ -206,6 +217,20 @@ function onRoomJoinError( evt )
 	alert("Room Not Joined");
 }
 
+function recordData( data )
+{
+	var str = "";
+	str += "[ ";
+	str += data[0];
+	for( var i=1; i<data.length; i++ )
+	{
+		str += ", ";
+		str += data[i];
+	}
+	str += " ]";
+	console.log(str);
+}
+
 // SFS handler for Extension Response event
 function onExtensionResponse( evt )
 {
@@ -213,11 +238,10 @@ function onExtensionResponse( evt )
 	if( requestType == "VoipVCRequest" )
 	{
 		var params = evt.params;
-		var data = params["VCData"];
 		if( params["ui"] != userid )
 		{
 			var data = params["VCData"];
-			console.log(params["ui"]+" is speaking");
+			//recordData(data);
 			playMuLawClip(data);
 		}
 	}
@@ -251,36 +275,37 @@ function connect( host, port, zone, voipRoom )
 	sfs.connect(config.host, config.port );
 }
 
+function sendSamples()
+{
+	console.log("sendSamples");
+	for( var i=0; i<encodedSamples.length; i++ )
+	{
+		var params = {};
+		params["ui"] = parseInt(userid);
+		params["VCData"] = normalizeData(Array.prototype.slice.call(encodedSamples[i]));
+		console.log(params["VCData"]);
+		sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
+	}
+}
+
 function sendAudio( floats )
 {
 	if( sendingAudio == true )
 	{
 		var resampled = downsample(floats, 44100, 8000);
-		//console.log("resampled");
-		//console.log(resampled);
 		var ints = float32ToInt16(resampled);
-		// console.log("ints");
-		// console.log(ints);
 		var encoded = new Int16Array(ints.length);
 		for( i=0; i<ints.length; i++ )
 			encoded[i] = MuLawEncode(ints[i]);
-		// console.log("encoded");
-		// console.log(encoded);
 		var data = new Int16Array(ints.length+6);
 		data[0] = ints.length;
 		for( var i=1; i<6; i++ )
 			data[i] = 0;
 		for( i=0; i<floats.length; i++ )
-		{
 			data[i+6] = encoded[i];
-		}
-		//console.log("sendAudio");
-		//console.log(data);
-		// playMuLawClip(data);
 		var params = {};
 		params["ui"] = parseInt(userid);
-		params["VCData"] = Array.prototype.slice.call(data);
-		// console.log(params["VCData"]);
+		params["VCData"] = normalizeData(Array.prototype.slice.call(data));
 		sfs.send(new SFS2X.Requests.System.ExtensionRequest("VoipVCRequest", params));
 	}
 }
